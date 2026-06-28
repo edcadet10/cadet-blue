@@ -1,0 +1,30 @@
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp
+.idea/
+.vscode/
+
+# Secrets / local config — never commit credentials or tenant-specific exports
+*.env
+.env*
+secrets/
+*.pem
+*.key
+*.pfx
+*_secret*
+*credential*
+
+# Large / raw evidence working files (keep curated screenshots under each project's assets/)
+*.evtx
+*.pcapng
+*.pcap
+raw-logs/
+scratch/
+
+# Build artifacts (if a landing page is added later)
+node_modules/
+dist/
+.next/
+out/
