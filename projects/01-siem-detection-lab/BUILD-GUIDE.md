@@ -72,13 +72,29 @@ on Microsoft Entra ID logs). Everything is benign and runs only in your own tena
 4. When a row appears (after the ingestion latency above), 📸 `04-kql-auditlog.png`.
    *(Tip: `AuditLogs | take 50` tells you the moment any audit data starts landing.)*
 
-## Phase 7 — Create the scheduled analytics rule
+## Phase 6.5 — Connect the workspace to the Defender portal (one-time)
 
-1. **Sentinel → Configuration → Analytics → + Create → Scheduled query rule.**
-2. **General:** Name = `Privileged role assignment`; Severity = **High**;
-   **MITRE ATT&CK** → tick **Privilege Escalation / T1098**.
-3. **Set rule logic:** paste the detection KQL (below); **Run query every** 5 min, **lookback** last
-   24 hours; **Entity mapping:** Account → `TargetUser`, optionally Account → `Actor`.
+Sentinel management (analytics rules, incidents) now lives in the **Microsoft Defender portal**.
+
+1. Go to **https://security.microsoft.com** → **System → Settings → Microsoft Sentinel → Connect a
+   workspace** → select **law-soc-lab** → set it **Primary** → **Connect**. (Tenant-level: Defender
+   takes one primary workspace; a single-workspace tenant has no conflict.)
+2. After it connects, **Microsoft Sentinel** appears in the left nav with **Configuration → Analytics**.
+
+## Phase 7 — Create the scheduled analytics rule (in the Defender portal)
+
+> Analytics-rule creation has moved out of the Azure portal to **https://security.microsoft.com**.
+> Do Phase 6.5 first. Right after connecting, the Analytics page may bounce to **Settings → SIEM
+> workspaces** for a while (onboarding propagation, ~tens of minutes) — wait and retry; it isn't a
+> permissions issue.
+
+1. **Microsoft Sentinel → Configuration → Analytics → + Create → Scheduled query rule.** (The wizard
+   is a left-side **timeline**, not Azure's tabs.)
+2. **General:** Name = `Privileged role assignment`; Severity = **High**; **MITRE ATT&CK** →
+   **Privilege Escalation / T1098**; Status = **Enabled**.
+3. **Set rule logic:** paste the detection KQL (below). **Entity mapping:** Account → **Full name (UPN)**
+   = `TargetUser` (optionally a 2nd Account → `Actor`). **Query scheduling:** Run every **5 min**, look
+   back **24 hours**, start **Automatically**. **Alert threshold:** results **greater than 0**.
    ```kql
    let sensitiveRoles = dynamic([
        "Global Administrator", "Privileged Role Administrator", "Security Administrator",
@@ -95,15 +111,24 @@ on Microsoft Entra ID logs). Everything is benign and runs only in your own tena
    | project TimeGenerated, RoleAdded, TargetUser, Actor, Result
    | order by TimeGenerated desc
    ```
-4. **Incident settings:** leave **Create incidents** on. **Review + create → Save.**
-   📸 `05-analytics-rule.png`.
+4. **Suppression (recommended):** turn **Stop running query after alert is generated** On → **24h**.
+   Without it, the 24h lookback re-fires every 5-min run and floods the incident with duplicate alerts.
+5. **Incident settings:** leave **Create incidents** **Enabled** (Sentinel-on-Defender means XDR
+   generates the incident). **Review + create → Save.** 📸 `05-analytics-rule.png`.
 
-## Phase 8 — Triage the incident
+> **Alternative — unified custom detection:** the same KQL can run as a **Defender XDR custom detection**
+> (**Advanced hunting → Create detection rule**, or **/v2/custom_detection**), but it requires the query
+> to project `Timestamp`/`ReportId` and map entities manually. The scheduled analytics rule above is the
+> cleaner fit for this `AuditLogs` query.
 
-1. **Sentinel → Threat management → Incidents.** Open the incident the rule raises (it will fire on
-   the next run that sees the ingested event). 📸 `06-incident.png`.
-2. Review **Entities** (soc-test01, Global Reader), open **Investigate** for the graph,
-   build a timeline. 📸 `07-investigation.png`.
+## Phase 8 — Triage the incident (Defender portal)
+
+1. **Investigation & response → Incidents & alerts → Incidents** (or **Incidents** at the top of the
+   nav). Open the **High** incident the rule raises — *"Privileged role assignment involving one user."*
+   📸 `06-incident.png` (the **Attack story** view: header, the correlated alert, and `soc-test01` in
+   the incident graph).
+2. Open the **Alerts** tab (or click an alert) to see the mapped account entity and the **T1098**
+   technique. 📸 `07-investigation.png`.
 3. Write a short analyst summary: what fired, the evidence, severity, recommended action.
 
 ## Phase 9 — Evidence checklist (fills the README)

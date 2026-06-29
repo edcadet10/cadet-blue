@@ -2,7 +2,7 @@
 
 ![Domain](https://img.shields.io/badge/Domain-SOC-1f6feb)
 ![Cert](https://img.shields.io/badge/Maps%20to-Security%2B-E2231A)
-![Status](https://img.shields.io/badge/Status-In%20Progress-f5a623)
+![Status](https://img.shields.io/badge/Status-Documented-2ea44f)
 
 > Stood up Microsoft Sentinel on a fresh Log Analytics workspace, streamed Microsoft Entra ID
 > identity logs into it, and built an **identity-threat detection for privileged-role assignment** —
@@ -19,7 +19,7 @@ detection that fires on the real behavior, validated against a controlled simula
 
 | Component | Detail |
 |---|---|
-| SIEM | **Microsoft Sentinel** |
+| SIEM | **Microsoft Sentinel** (managed in the unified **Microsoft Defender portal**) |
 | Workspace | **Log Analytics** `law-soc-lab` (resource group `rg-soc-lab`, East US 2) |
 | Identity source | **Microsoft Entra ID** → **Diagnostic setting** `entra-to-law` streaming **AuditLogs** + **SignInLogs** |
 | Query language | **KQL** (Kusto Query Language) |
@@ -58,9 +58,11 @@ flowchart LR
 5. **Simulated the attack** — assigned `soc-test01` to sensitive read-only directory roles
    (**Global Reader**, then **Security Reader**), each generating an Entra *"Add member to role"*
    audit event for the detection to catch.
-6. **Validated the pipeline** — confirmed the audit event lands in `law-soc-lab` via KQL in Logs,
-   then promoted the query to a scheduled **analytics rule** that raises an incident. *(rule +
-   incident in progress — pending first-ingestion latency; see status.)*
+6. **Validated the pipeline end to end** — confirmed the audit event lands in `law-soc-lab` via KQL,
+   promoted the query to a scheduled **analytics rule** (built in the unified **Microsoft Defender
+   portal**, where Sentinel analytics-rule management now lives), and watched it raise a
+   **High-severity incident** with `soc-test01` auto-mapped as the impacted entity — then tuned out
+   duplicate alerts caused by the 24-hour lookback.
 
 ## Detection — Privileged role assignment (`T1098`)
 
@@ -105,17 +107,24 @@ AuditLogs
 - [x] `assets/02-entra-diagnostic-settings.png` — `entra-to-law` connector → `law-soc-lab`
 - [x] `assets/03-role-assignment.png` — `soc-test01` granted Global Reader (the trigger)
 - [x] `assets/04-kql-auditlog.png` — detection KQL returning the captured "Add member to role" event (Security Reader)
-- [ ] `assets/05-analytics-rule.png` — the scheduled analytics rule
-- [ ] `assets/06-incident.png` — the resulting incident with mapped entities
-- [ ] `assets/07-investigation.png` — investigation graph / triage
+- [x] `assets/05-analytics-rule.png` — the scheduled rule (Enabled · High · T1098) in the Defender portal
+- [x] `assets/06-incident.png` — the resulting **High** incident with `soc-test01` mapped as the entity
+- [x] `assets/07-investigation.png` — the incident's alert queue (Privilege Escalation) for triage
 
 ## Lessons learned
 
 Real findings from building this lab:
 
-- **Sentinel is migrating to the Defender portal** (Content hub now redirects there; full move by
-  2027-03-31). The portable, supported way to onboard Entra logs is **diagnostic settings**, which
-  auto-enables the Sentinel connector — not the Content hub UI.
+- **Sentinel has moved into the unified Defender portal.** Both the Content hub and **analytics-rule
+  creation** now redirect out of the Azure portal — you connect the workspace to Defender
+  (System → Settings → Microsoft Sentinel) and build rules under **Microsoft Sentinel → Configuration
+  → Analytics**. Onboarding Entra logs is still done via **diagnostic settings**, which auto-enables
+  the connector. Right after connecting a workspace, the Analytics page briefly redirects to workspace
+  settings until onboarding propagates (~tens of minutes) — expected, not an error.
+- **Lookback vs. run frequency drives alert noise.** Running every 5 minutes with a 24-hour lookback
+  meant each run re-detected the same event and raised a duplicate alert (one incident, three alerts).
+  Fixed with **alert suppression** (stop querying for 24h after an alert) so one event maps to one
+  alert — a core detection-tuning trade-off.
 - **First-time log ingestion is slow.** Microsoft documents that after creating a diagnostic
   setting, data starts flowing **within ~90 minutes** and can officially take **up to three days**
   on first setup. Plan validation around that latency rather than expecting instant results.
