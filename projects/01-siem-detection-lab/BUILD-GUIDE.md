@@ -1,126 +1,127 @@
 # BUILD GUIDE · SIEM & Detection Engineering Lab (Microsoft Sentinel)
 
 Reproduce the lab end-to-end. Navigation is by **resource name in the Azure portal search bar**;
-exact blades and buttons are named. Everything here is benign and runs only in your own lab.
+exact blades and buttons are named. This guide matches the actual build (identity-first detection
+on Microsoft Entra ID logs). Everything is benign and runs only in your own tenant.
 
-> **Cost note:** Sentinel/Log Analytics bill on ingested GB. A small lab is a few dollars; turn
-> off or cap ingestion when done. There is a free trial tier for Sentinel on new workspaces.
+> **Cost note:** Sentinel/Log Analytics bill on ingested GB. This identity-only lab is a few cents
+> to a couple dollars. Delete the resource group when done (Phase 10).
 
 ---
 
 ## Phase 0 — Prerequisites
 
 - [ ] An Azure subscription you can create resources in.
-- [ ] Your Entra tenant (`admintradeproof.onmicrosoft.com` lab) with **Global Admin** or
-      **Security Admin** for the identity-log steps.
-- [ ] **DC01** (Windows Server 2022) and at least one domain-joined Windows client, both able to
-      reach Azure (for the Azure Monitor Agent).
-- [ ] **Licensing caveat (be honest in the write-up):** streaming Entra **SigninLogs** to Log
-      Analytics requires **Entra ID P1**. If your lab tenant is free, do the Windows-host
-      detections (rules 1 & 4) and the audit-log detection (rule 3, available without P1), and
-      note the sign-in-log rule (rule 2) as "requires P1" rather than skipping it silently.
+- [ ] An account with **Global Administrator** / **Security Administrator** in the tenant (used for
+      diagnostic settings + role assignment). Do **not** use a low-privilege user.
+- [ ] **Licensing note:** streaming **SignInLogs** to Log Analytics needs **Entra ID P1**.
+      **AuditLogs** (which this lab's detection uses) flow on **any** license, including free.
 
-## Phase 1 — Create the Log Analytics workspace
+## Phase 1 — Create the workspace (and resource group)
 
-1. Portal search bar → **Log Analytics workspaces** → **Create**.
-2. Resource group: **rg-soc-lab** (create new). Name: **law-soc-lab**. Region: **East US 2**
-   (match your other labs). → **Review + create** → **Create**.
+1. Search bar → **Log Analytics workspaces** → **+ Create**.
+2. **Basics:** Subscription = your sub; **Resource group → Create new** = `rg-soc-lab`;
+   **Name** = `law-soc-lab`; **Region** = `East US 2`.
+3. **Review + create** → **Create**. Wait for "deployment complete."
 
 ## Phase 2 — Enable Microsoft Sentinel
 
-1. Search bar → **Microsoft Sentinel** → **Create** (or **Add**).
-2. Select **law-soc-lab** → **Add Microsoft Sentinel**.
-3. You should land on the Sentinel **Overview** for that workspace. 📸 *Screenshot 01 candidate.*
+1. Search bar → **Microsoft Sentinel** → **+ Create**.
+2. Select **law-soc-lab** → **Add**. You land on **Microsoft Sentinel | Overview**.
+   📸 `01-sentinel-overview.png`.
 
-## Phase 3 — Connect Windows Security Events (via AMA)
+> **Note:** Sentinel's **Content hub** now redirects to the **Microsoft Defender portal** (Sentinel
+> is consolidating there by 2027-03-31). You don't need it — we onboard logs via diagnostic settings.
 
-1. In Sentinel → left nav **Content management → Content hub** → search **Windows Security Events**
-   → **Install** the solution.
-2. Left nav **Configuration → Data connectors** → open **Windows Security Events via AMA** →
-   **Open connector page**.
-3. **Create data collection rule (DCR):**
-   - Name: **dcr-windows-security**.
-   - Resources: **Add** → select **DC01** and your client (Azure Arc-enable them first if they're
-     on-prem — the connector page links the Arc onboarding; for Azure VMs they appear directly).
-   - Collect: choose **All Security Events** (lab) or **Common** to save cost.
-   - **Create**. The AMA deploys automatically to the selected machines.
-4. Verify ingestion: Sentinel → **Logs** → run `SecurityEvent | take 10`. Events should appear
-   within ~10–15 min.
+## Phase 3 — Stream Entra ID logs (diagnostic settings)
 
-## Phase 4 — Connect Entra ID logs (sign-in + audit)
+1. Search bar → **Microsoft Entra ID** → **Monitoring & health → Diagnostic settings**.
+2. **+ Add diagnostic setting.** Name = `entra-to-law`.
+3. **Logs:** tick **AuditLogs** and **SignInLogs** *(if you lack P1, SignInLogs save but won't
+   actually flow — AuditLogs is enough for this lab)*.
+4. **Destination:** **Send to Log Analytics workspace** → **law-soc-lab** → **Save**.
+   📸 `02-entra-diagnostic-settings.png`.
 
-1. Search bar → **Microsoft Entra ID** → left nav **Monitoring → Diagnostic settings** →
-   **Add diagnostic setting**.
-2. Name: **entra-to-law**. Check **SignInLogs** (needs P1) and **AuditLogs** (no P1 needed).
-3. Destination: **Send to Log Analytics workspace** → **law-soc-lab** → **Save**.
-4. Verify: Sentinel → **Logs** → `SigninLogs | take 10` and `AuditLogs | take 10`.
+> **Latency reality (important):** per Microsoft, after creating a diagnostic setting, data starts
+> flowing **within ~90 minutes** and can officially take **up to 3 days** on first setup (often
+> ~15 min, but not guaranteed). Don't expect instant results — this is normal.
 
-## Phase 5 — Turn on command-line auditing (for rule 4)
+## Phase 4 — Create the test subject
 
-On **DC01** (or a GPO linked to the clients' OU), enable process-creation logging with command line:
+1. **Microsoft Entra ID → Users → All users → + New user → Create new user.**
+2. **UPN** = `soc-test01`; **Display name** = `SOC Test User 01`; set a password (keep it out of any
+   repo); leave it a standard member (no roles). **Review + create → Create.**
 
-1. **Group Policy Management** → edit the policy for your client OU.
-2. *Computer Configuration → Policies → Windows Settings → Security Settings → Advanced Audit
-   Policy → Detailed Tracking* → **Audit Process Creation** = **Success**.
-3. *Computer Configuration → Policies → Administrative Templates → System → Audit Process Creation*
-   → **Include command line in process creation events** = **Enabled**.
-4. On the client: `gpupdate /force`.
+## Phase 5 — Simulate the attack (privilege escalation)
 
-## Phase 6 — Create the four analytics rules
+1. **Microsoft Entra ID → Roles and administrators** → open **Global Reader** (read-only but
+   sensitive — zero real risk).
+2. **+ Add assignments** → select **soc-test01** → **Add**.
+   This writes an Entra audit event: *"Add member to role"*. 📸 `03-role-assignment.png`.
 
-For each rule: Sentinel → **Configuration → Analytics → Create → Scheduled query rule**.
-General tab: set **Name**, **Severity**, **MITRE technique** (Set rule logic tab → Techniques).
-Set rule logic tab: paste the KQL, set **Run query every** 5–15 min over the last 1 hour, set
-**Entity mapping** (Account = TargetAccount/UserPrincipalName; Host = Computer; IP = IPAddress).
+## Phase 6 — Confirm the event arrived (KQL)
 
-1. **Brute force then success** — Severity *Medium*, technique **T1110**. KQL = detection #1 in
-   [`README.md`](README.md).
-2. **Impossible travel** — Severity *Medium*, technique **T1078**. KQL = detection #2.
-   *(Skip if no P1 — note it in the write-up.)*
-3. **New privileged-role member** — Severity *High*, technique **T1098**. KQL = detection #3.
-4. **Suspicious PowerShell** — Severity *High*, technique **T1059.001**. KQL = detection #4.
+1. **Microsoft Sentinel → law-soc-lab → General → Logs.**
+2. **Set the editor to `KQL mode`** (top-right toggle — *not* Simple mode). Time range = **Last 24 hours**.
+3. Run:
+   ```kql
+   AuditLogs
+   | where OperationName == "Add member to role"
+   | order by TimeGenerated desc
+   ```
+4. When a row appears (after the ingestion latency above), 📸 `04-kql-auditlog.png`.
+   *(Tip: `AuditLogs | take 50` tells you the moment any audit data starts landing.)*
 
-📸 *Screenshot 02 candidate: the four enabled rules in the Analytics list.*
+## Phase 7 — Create the scheduled analytics rule
 
-## Phase 7 — Simulate the attacks (lab-safe)
+1. **Sentinel → Configuration → Analytics → + Create → Scheduled query rule.**
+2. **General:** Name = `Privileged role assignment`; Severity = **High**;
+   **MITRE ATT&CK** → tick **Privilege Escalation / T1098**.
+3. **Set rule logic:** paste the detection KQL (below); **Run query every** 5 min, **lookback** last
+   24 hours; **Entity mapping:** Account → `TargetUser`, optionally Account → `Actor`.
+   ```kql
+   let sensitiveRoles = dynamic([
+       "Global Administrator", "Privileged Role Administrator", "Security Administrator",
+       "User Administrator", "Global Reader", "Security Reader"
+   ]);
+   AuditLogs
+   | where OperationName == "Add member to role"
+   | mv-expand prop = TargetResources[0].modifiedProperties
+   | where tostring(prop.displayName) == "Role.DisplayName"
+   | extend RoleAdded = trim('"', tostring(prop.newValue))
+   | where RoleAdded in (sensitiveRoles)
+   | extend Actor = tostring(InitiatedBy.user.userPrincipalName),
+            TargetUser = tostring(TargetResources[0].userPrincipalName)
+   | project TimeGenerated, RoleAdded, TargetUser, Actor, Result
+   | order by TimeGenerated desc
+   ```
+4. **Incident settings:** leave **Create incidents** on. **Review + create → Save.**
+   📸 `05-analytics-rule.png`.
 
-> All benign; run only against your own lab accounts/hosts.
+## Phase 8 — Triage the incident
 
-- **Brute force (rule 1):** on the client, attempt logon with a wrong password 10+ times in 10 min
-  for a test account (e.g., repeated `runas /user:LAB\\testuser cmd` with a bad password, or failed
-  RDP attempts), then one **correct** logon.
-- **New privileged-role member (rule 3):** Entra ID → **Roles and administrators** → e.g.
-  **Security Reader** → **Add assignment** → add a throwaway test user → then **Remove**. (Use a
-  low-impact role for the lab; the rule's role list can include it for testing.)
-- **Suspicious PowerShell (rule 4):** on the client run a harmless encoded command, e.g.
-  `powershell -enc <base64-of:Get-Date>` so `CommandLine` contains `-enc`.
-- **Impossible travel (rule 2, if P1):** sign in to `https://portal.azure.com` as a test user from
-  your normal IP, then within an hour from a VPN/cloud VM in another country.
+1. **Sentinel → Threat management → Incidents.** Open the incident the rule raises (it will fire on
+   the next run that sees the ingested event). 📸 `06-incident.png`.
+2. Review **Entities** (soc-test01, Global Reader), open **Investigate** for the graph,
+   build a timeline. 📸 `07-investigation.png`.
+3. Write a short analyst summary: what fired, the evidence, severity, recommended action.
 
-## Phase 8 — Triage the incidents
+## Phase 9 — Evidence checklist (fills the README)
 
-1. Sentinel → **Threat management → Incidents**. Open each generated incident.
-2. Review **Entities**, open **Investigate** for the graph, build the **timeline**.
-3. Write a 3–4 sentence analyst summary per incident: what fired, the evidence, severity, and
-   recommended action. (These become the "Lessons learned" + incident notes in the write-up.)
+- [ ] `01-sentinel-overview.png` · [ ] `02-entra-diagnostic-settings.png` · [ ] `03-role-assignment.png`
+- [ ] `04-kql-auditlog.png` · [ ] `05-analytics-rule.png` · [ ] `06-incident.png` · [ ] `07-investigation.png`
 
-📸 *Screenshots 03 & 04 candidates: a brute-force incident with entities; the investigation graph.*
+Copy them from `C:\Users\jcade\Downloads\soc-lab-assets` into this project's `assets/` folder,
+then flip the README status from **In Progress** to **Documented**.
 
-## Phase 9 — Evidence checklist (fills the README placeholders)
+## Phase 10 — Cleanup
 
-- [ ] `assets/01-sentinel-overview.png` — workspace + connected data connectors
-- [ ] `assets/02-analytics-rules.png` — the four enabled analytics rules
-- [ ] `assets/03-bruteforce-incident.png` — brute-force incident with mapped entities
-- [ ] `assets/04-investigation-graph.png` — investigation graph for a triaged incident
-- [ ] `assets/05-kql-hunt.png` — an ad-hoc KQL hunt (e.g., `SecurityEvent | where EventID==4625`)
+1. **Roles and administrators → Global Reader →** remove **soc-test01**.
+2. **Users →** delete **soc-test01** (kills the test credential).
+3. Delete the resource group **`rg-soc-lab`** to stop all charges.
 
-## Phase 10 — Clean up (control cost)
+## Optional expansion (stronger flagship)
 
-- Remove the diagnostic setting, or set a **daily cap** on **law-soc-lab** (workspace → *Usage and
-  estimated costs → Daily cap*).
-- Delete **rg-soc-lab** when finished to stop all charges.
-
----
-
-When the screenshots are in `assets/` and the lessons are written, flip the status badge in
-[`README.md`](README.md) from **In Progress** to **Documented**.
+- **Add a Windows log source** — a small Azure Windows VM + Azure Monitor Agent → enables
+  **brute-force (T1110)** and **suspicious PowerShell (T1059.001)** detections.
+- **Enable Entra ID P1** → **SignInLogs** flow → adds **impossible-travel (T1078)** detection.

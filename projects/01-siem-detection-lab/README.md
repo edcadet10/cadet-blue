@@ -4,148 +4,130 @@
 ![Cert](https://img.shields.io/badge/Maps%20to-Security%2B-E2231A)
 ![Status](https://img.shields.io/badge/Status-In%20Progress-f5a623)
 
-> Stood up Microsoft Sentinel over a live Windows Active Directory + Entra ID environment,
-> connected host and identity log sources, and authored detections for brute-force, anomalous
-> sign-in, privilege escalation, and suspicious PowerShell — then validated them by simulating
-> the attacks and triaging the resulting incidents.
+> Stood up Microsoft Sentinel on a fresh Log Analytics workspace, streamed Microsoft Entra ID
+> identity logs into it, and built an **identity-threat detection for privileged-role assignment** —
+> then validated it end-to-end by elevating a test account and tracing the event through the pipeline.
 
 ## Objective
 
-A security analyst's core loop is **collect → detect → triage → respond**. This project builds
-that loop end-to-end in a real environment: get the right logs into a SIEM, write detections that
-fire on attacker behavior (not noise), and prove they work by generating the activity and working
-the resulting alerts like a Tier-1 analyst would.
+Build the security analyst's core loop — **collect → detect → triage** — in a live Azure tenant.
+The first detection targets a high-value attacker behavior: **privilege escalation via directory
+role assignment** (an attacker or insider granting an account elevated rights). The goal is a
+detection that fires on the real behavior, validated against a controlled simulation.
 
 ## Environment / Tools
 
 | Component | Detail |
 |---|---|
-| SIEM | **Microsoft Sentinel** (on a Log Analytics workspace) |
-| Identity | **Entra ID** tenant (`admintradeproof.onmicrosoft.com` lab) |
-| Endpoints | **Windows Server 2022** domain controller (DC01) + domain-joined Windows clients |
-| Telemetry | Azure Monitor Agent (AMA) → Windows Security Events; Entra **SigninLogs** + **AuditLogs** |
+| SIEM | **Microsoft Sentinel** |
+| Workspace | **Log Analytics** `law-soc-lab` (resource group `rg-soc-lab`, East US 2) |
+| Identity source | **Microsoft Entra ID** → **Diagnostic setting** `entra-to-law` streaming **AuditLogs** + **SignInLogs** |
 | Query language | **KQL** (Kusto Query Language) |
-| Framework | **MITRE ATT&CK** for detection mapping |
+| Framework | **MITRE ATT&CK** |
+| Test subject | `soc-test01` (standard member account, created for the lab) |
 
 ## Architecture
 
 ```mermaid
 flowchart LR
-    subgraph OnPrem["On-prem / domain"]
-        DC["DC01 — Windows Server 2022<br/>AD DS, DNS, DHCP"]
-        EP["Domain-joined clients"]
+    subgraph Entra["Microsoft Entra ID"]
+        AUD["Audit logs<br/>(role changes, user mgmt)"]
+        SGN["Sign-in logs<br/>(needs Entra ID P1)"]
     end
-    subgraph Azure["Azure tenant"]
-        AAD["Entra ID<br/>Sign-in + Audit logs"]
-        AMA["Azure Monitor Agent"]
-        LAW[("Log Analytics<br/>workspace")]
-        SENT["Microsoft Sentinel<br/>Analytics rules + Incidents"]
-    end
+    DS["Diagnostic setting<br/>entra-to-law"]
+    LAW[("Log Analytics<br/>law-soc-lab")]
+    SENT["Microsoft Sentinel<br/>Analytics rule + Incident"]
+    AN(["SOC analyst<br/>triage & investigate"])
 
-    DC -->|"Security events 4624/4625/4688"| AMA
-    EP -->|"Security events"| AMA
-    AMA --> LAW
-    AAD -->|"Diagnostic settings"| LAW
+    AUD --> DS
+    SGN --> DS
+    DS --> LAW
     LAW --> SENT
-    SENT -->|"Alerts → Incidents"| Analyst(["SOC Analyst<br/>triage & investigate"])
+    SENT -->|"Alert -> Incident"| AN
 ```
 
 ## What I did
 
-1. Created a Log Analytics workspace and enabled Microsoft Sentinel on it.
-2. Connected data sources:
-   - **Windows Security Events via AMA** from DC01 and clients (logon, process-creation auditing).
-   - **Entra ID** sign-in and audit logs via diagnostic settings.
-3. Authored four analytics rules (below), each mapped to a MITRE ATT&CK technique and tuned to
-   reduce false positives (thresholds, time windows, allow-lists for known admin hosts).
-4. Simulated each attack from a test client to generate real telemetry.
-5. Triaged the resulting incidents in Sentinel — reviewed entities, built a timeline, and wrote a
-   short analyst summary for each (what fired, what it means, recommended action).
+1. **Created the workspace** — new resource group `rg-soc-lab` and Log Analytics workspace `law-soc-lab`.
+2. **Enabled Microsoft Sentinel** on `law-soc-lab`.
+3. **Connected the identity log source.** The Sentinel Content hub now redirects to the Microsoft
+   Defender portal, so I wired logs the supported way — **Entra ID → Diagnostic settings**
+   (`entra-to-law`) streaming **AuditLogs** and **SignInLogs** to `law-soc-lab`. Per Microsoft's
+   docs, configuring the diagnostic setting **auto-enables the Sentinel Entra connector**.
+4. **Created a test subject** — `soc-test01`, a standard (no-privilege) member account.
+5. **Simulated the attack** — assigned `soc-test01` the **Global Reader** directory role (a
+   read-only but sensitive role), generating an Entra *"Add member to role"* audit event.
+6. **Validated the pipeline** — confirmed the audit event lands in `law-soc-lab` via KQL in Logs,
+   then promoted the query to a scheduled **analytics rule** that raises an incident. *(rule +
+   incident in progress — pending first-ingestion latency; see status.)*
 
-## Detections
+## Detection — Privileged role assignment (`T1098`)
 
-> KQL below is illustrative of the deployed rules; see [`BUILD-GUIDE.md`](BUILD-GUIDE.md) for the
-> full rule configuration (severity, scheduling, entity mapping).
+Fires when an account is added to a sensitive directory role:
 
-**1. Password brute force followed by success — `T1110`**
 ```kql
-let failures = SecurityEvent
-    | where EventID == 4625
-    | summarize Failures = count() by TargetAccount, Window = bin(TimeGenerated, 10m);
-let successes = SecurityEvent
-    | where EventID == 4624
-    | summarize FirstSuccess = min(TimeGenerated) by TargetAccount, Window = bin(TimeGenerated, 10m);
-failures
-| where Failures >= 10
-| join kind=inner (successes) on TargetAccount, Window
-| project Window, TargetAccount, Failures, FirstSuccess
-```
-
-**2. Anomalous Entra sign-in / impossible travel — `T1078`**
-```kql
-SigninLogs
-| where ResultType == 0
-| project TimeGenerated, UserPrincipalName, IPAddress,
-          Country = tostring(LocationDetails.countryOrRegion)
-| order by UserPrincipalName asc, TimeGenerated asc
-| serialize
-| extend PrevUser = prev(UserPrincipalName), PrevCountry = prev(Country), PrevTime = prev(TimeGenerated)
-| where UserPrincipalName == PrevUser and Country != PrevCountry
-| extend MinutesApart = datetime_diff('minute', TimeGenerated, PrevTime)
-| where MinutesApart <= 60
-```
-
-**3. New member added to a privileged role — `T1098`**
-```kql
+let sensitiveRoles = dynamic([
+    "Global Administrator", "Privileged Role Administrator", "Security Administrator",
+    "User Administrator", "Global Reader", "Security Reader"
+]);
 AuditLogs
 | where OperationName == "Add member to role"
-| extend Role = tostring(TargetResources[0].displayName)
-| where Role has_any ("Global Administrator", "Privileged Role Administrator", "Security Administrator")
-| project TimeGenerated,
-          InitiatedBy = tostring(InitiatedBy.user.userPrincipalName),
-          Role,
-          Target = tostring(TargetResources[0].userPrincipalName)
+| mv-expand prop = TargetResources[0].modifiedProperties
+| where tostring(prop.displayName) == "Role.DisplayName"
+| extend RoleAdded = trim('"', tostring(prop.newValue))
+| where RoleAdded in (sensitiveRoles)
+| extend Actor = tostring(InitiatedBy.user.userPrincipalName),
+         TargetUser = tostring(TargetResources[0].userPrincipalName)
+| project TimeGenerated, RoleAdded, TargetUser, Actor, Result
+| order by TimeGenerated desc
 ```
 
-**4. Suspicious / encoded PowerShell — `T1059.001`**
-```kql
-SecurityEvent
-| where EventID == 4688
-| where NewProcessName endswith "powershell.exe" or NewProcessName endswith "pwsh.exe"
-| where CommandLine has_any ("-enc", "-EncodedCommand", "-w hidden", "DownloadString", "FromBase64String", "IEX")
-| project TimeGenerated, Computer, Account, NewProcessName, CommandLine
-```
+### Planned expansion (next iterations)
+- **Anomalous sign-in / impossible travel** (`T1078`) — from `SignInLogs`; requires **Entra ID P1**.
+- **Brute force** (`T1110`) and **suspicious PowerShell** (`T1059.001`) — require a Windows log
+  source (a small Azure VM with the Azure Monitor Agent), documented as the next build-out.
 
 ## Skills demonstrated
 
-- SIEM deployment and log-source onboarding (Microsoft Sentinel, Log Analytics, AMA)
-- Detection engineering in **KQL** with false-positive tuning
-- Mapping detections to **MITRE ATT&CK** techniques
-- Identity-threat detection using **Entra ID** sign-in and audit logs
-- Alert triage and incident investigation (entities, timeline, analyst write-up)
-- Windows security auditing (logon events 4624/4625, process creation 4688)
+- Microsoft Sentinel deployment and workspace setup
+- Identity log onboarding via **Entra ID diagnostic settings** (audit + sign-in)
+- **Detection engineering in KQL** (parsing `AuditLogs`, `mv-expand`, role allow-list)
+- Mapping detections to **MITRE ATT&CK** (T1098 privilege escalation)
+- Controlled attack simulation and end-to-end pipeline validation
+- Identity & access fundamentals (directory roles, least privilege)
 
 ## Results / Evidence
 
-> 🚧 Lab build in progress — capturing these as I complete each step (see BUILD-GUIDE):
+> Screenshots captured to `C:\Users\jcade\Downloads\soc-lab-assets`, then copied into `assets/`.
 
-- [ ] `assets/01-sentinel-overview.png` — Sentinel workspace + connected data connectors
-- [ ] `assets/02-analytics-rules.png` — the four enabled analytics rules
-- [ ] `assets/03-bruteforce-incident.png` — brute-force incident with mapped entities
-- [ ] `assets/04-investigation-graph.png` — investigation graph for a triaged incident
-- [ ] `assets/05-kql-hunt.png` — an ad-hoc KQL hunt returning the simulated activity
+- [x] `assets/01-sentinel-overview.png` — Sentinel enabled on `law-soc-lab`
+- [x] `assets/02-entra-diagnostic-settings.png` — `entra-to-law` connector → `law-soc-lab`
+- [x] `assets/03-role-assignment.png` — `soc-test01` granted Global Reader (the trigger)
+- [ ] `assets/04-kql-auditlog.png` — KQL in Logs returning the "Add member to role" event
+- [ ] `assets/05-analytics-rule.png` — the scheduled analytics rule
+- [ ] `assets/06-incident.png` — the resulting incident with mapped entities
+- [ ] `assets/07-investigation.png` — investigation graph / triage
 
 ## Lessons learned
 
-_(To fill in after the build — e.g., tuning thresholds to cut false positives, AMA vs. legacy MMA
-onboarding, and why entity mapping matters for fast triage.)_
+Real findings from building this lab:
+
+- **Sentinel is migrating to the Defender portal** (Content hub now redirects there; full move by
+  2027-03-31). The portable, supported way to onboard Entra logs is **diagnostic settings**, which
+  auto-enables the Sentinel connector — not the Content hub UI.
+- **First-time log ingestion is slow.** Microsoft documents that after creating a diagnostic
+  setting, data starts flowing **within ~90 minutes** and can officially take **up to three days**
+  on first setup. Plan validation around that latency rather than expecting instant results.
+- **Sign-in logs need Entra ID P1**; audit logs flow on any (including free) license. The license
+  gate is enforced silently, so confirm which log types actually arrive.
+- **Never store credentials in a portfolio repo.** The lab's test password is kept out of git and
+  the account is deleted in cleanup — basic hygiene that a SOC review should enforce.
 
 ## Mapped to
 
 - **CompTIA Security+ (SY0-701) — Domain 4, Security Operations:** monitoring & alerting, SIEM /
-  log data analysis, and incident response activities.
-- **MITRE ATT&CK:** T1110 (Brute Force), T1078 (Valid Accounts), T1098 (Account Manipulation),
-  T1059.001 (PowerShell).
+  log data analysis, incident response.
+- **MITRE ATT&CK:** T1098 (Account Manipulation / privilege escalation). Planned: T1078, T1110, T1059.001.
 
 ## Reproduce this lab
 
