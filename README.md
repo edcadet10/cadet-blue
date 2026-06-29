@@ -10,7 +10,6 @@
 
 **Jeff Cadet** · Columbus, OH · Open to remote
 [LinkedIn](https://www.linkedin.com/in/iamedcadet) · [GitHub](https://github.com/edcadet10)
-<!-- TODO: add public contact email if you want one listed here -->
 
 ---
 
