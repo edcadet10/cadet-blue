@@ -55,8 +55,9 @@ flowchart LR
    (`entra-to-law`) streaming **AuditLogs** and **SignInLogs** to `law-soc-lab`. Per Microsoft's
    docs, configuring the diagnostic setting **auto-enables the Sentinel Entra connector**.
 4. **Created a test subject** — `soc-test01`, a standard (no-privilege) member account.
-5. **Simulated the attack** — assigned `soc-test01` the **Global Reader** directory role (a
-   read-only but sensitive role), generating an Entra *"Add member to role"* audit event.
+5. **Simulated the attack** — assigned `soc-test01` to sensitive read-only directory roles
+   (**Global Reader**, then **Security Reader**), each generating an Entra *"Add member to role"*
+   audit event for the detection to catch.
 6. **Validated the pipeline** — confirmed the audit event lands in `law-soc-lab` via KQL in Logs,
    then promoted the query to a scheduled **analytics rule** that raises an incident. *(rule +
    incident in progress — pending first-ingestion latency; see status.)*
@@ -103,7 +104,7 @@ AuditLogs
 - [x] `assets/01-sentinel-overview.png` — Sentinel enabled on `law-soc-lab`
 - [x] `assets/02-entra-diagnostic-settings.png` — `entra-to-law` connector → `law-soc-lab`
 - [x] `assets/03-role-assignment.png` — `soc-test01` granted Global Reader (the trigger)
-- [ ] `assets/04-kql-auditlog.png` — KQL in Logs returning the "Add member to role" event
+- [x] `assets/04-kql-auditlog.png` — detection KQL returning the captured "Add member to role" event (Security Reader)
 - [ ] `assets/05-analytics-rule.png` — the scheduled analytics rule
 - [ ] `assets/06-incident.png` — the resulting incident with mapped entities
 - [ ] `assets/07-investigation.png` — investigation graph / triage
