@@ -57,7 +57,7 @@ it demonstrates, and the evidence. Status is labeled honestly — see the legend
 
 | # | Project | Domain | Status |
 |---|---------|--------|--------|
-| 01 | [SIEM & Detection Engineering Lab (Microsoft Sentinel)](projects/01-siem-detection-lab/) | SOC | 🚧 In Progress |
+| 01 | [SIEM & Detection Engineering Lab (Microsoft Sentinel)](projects/01-siem-detection-lab/) | SOC | ✅ Documented |
 | 02 | [Incident Response: Phishing → Compromise](projects/02-incident-response-phishing/) | SOC / IR | 📋 Planned |
 | 03 | [Vulnerability Management Program](projects/03-vulnerability-management/) | Vuln Mgmt | 📋 Planned |
 | 04 | [Endpoint Hardening to CIS Benchmark](projects/04-endpoint-hardening-cis/) | Vuln Mgmt | 📋 Planned |
