@@ -6,6 +6,8 @@
 
 ![Endpoint Hardening: the path to CIS compliance](assets/infographic-endpoint-hardening.png)
 
+🎧 **Audio overview** (AI-generated, NotebookLM): [Hardening Ubuntu, 59 → 80](assets/audio-overview-endpoint-hardening.m4a)
+
 > Take a default Windows 11 and Ubuntu 22.04 host to their CIS Level 1 baselines, scoring each before
 > and after, and documenting every control I deliberately skip. **Linux host done: Lynis 59 → 80.**
 > Windows host is the remaining half.
