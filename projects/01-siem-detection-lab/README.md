@@ -4,27 +4,27 @@
 ![Cert](https://img.shields.io/badge/Maps%20to-Security%2B-E2231A)
 ![Status](https://img.shields.io/badge/Status-Documented-2ea44f)
 
-> Stood up Microsoft Sentinel on a fresh Log Analytics workspace, streamed Microsoft Entra ID
-> identity logs into it, and built an **identity-threat detection for privileged-role assignment** —
-> then validated it end-to-end by elevating a test account and tracing the event through the pipeline.
+> Stood up Microsoft Sentinel on a fresh Log Analytics workspace, streamed Entra ID identity logs
+> into it, and wrote a detection that fires when someone is added to a sensitive directory role.
+> Then I proved it works: elevated a test account and followed the event from raw log to triaged incident.
 
 ## Objective
 
-Build the security analyst's core loop — **collect → detect → triage** — in a live Azure tenant.
-The first detection targets a high-value attacker behavior: **privilege escalation via directory
-role assignment** (an attacker or insider granting an account elevated rights). The goal is a
-detection that fires on the real behavior, validated against a controlled simulation.
+Build the collect → detect → triage loop a SOC analyst actually works in, inside a live Azure tenant.
+The detection targets one specific behavior: privilege escalation through a directory-role assignment,
+where an attacker or insider quietly grants an account elevated rights. I wanted a rule that fires on
+the real thing, not a toy example, so I validated it against a controlled simulation.
 
 ## Environment / Tools
 
 | Component | Detail |
 |---|---|
-| SIEM | **Microsoft Sentinel** (managed in the unified **Microsoft Defender portal**) |
-| Workspace | **Log Analytics** `law-soc-lab` (resource group `rg-soc-lab`, East US 2) |
-| Identity source | **Microsoft Entra ID** → **Diagnostic setting** `entra-to-law` streaming **AuditLogs** + **SignInLogs** |
-| Query language | **KQL** (Kusto Query Language) |
-| Framework | **MITRE ATT&CK** |
-| Test subject | `soc-test01` (standard member account, created for the lab) |
+| SIEM | Microsoft Sentinel (managed in the Microsoft Defender portal) |
+| Workspace | Log Analytics `law-soc-lab` (resource group `rg-soc-lab`, East US 2) |
+| Identity source | Microsoft Entra ID, streamed via diagnostic setting `entra-to-law` (AuditLogs + SignInLogs) |
+| Query language | KQL (Kusto Query Language) |
+| Framework | MITRE ATT&CK |
+| Test subject | `soc-test01`, a standard member account created for the lab |
 
 ## Architecture
 
@@ -48,23 +48,22 @@ flowchart LR
 
 ## What I did
 
-1. **Created the workspace** — new resource group `rg-soc-lab` and Log Analytics workspace `law-soc-lab`.
-2. **Enabled Microsoft Sentinel** on `law-soc-lab`.
-3. **Connected the identity log source.** The Sentinel Content hub now redirects to the Microsoft
-   Defender portal, so I wired logs the supported way — **Entra ID → Diagnostic settings**
-   (`entra-to-law`) streaming **AuditLogs** and **SignInLogs** to `law-soc-lab`. Per Microsoft's
-   docs, configuring the diagnostic setting **auto-enables the Sentinel Entra connector**.
-4. **Created a test subject** — `soc-test01`, a standard (no-privilege) member account.
-5. **Simulated the attack** — assigned `soc-test01` to sensitive read-only directory roles
-   (**Global Reader**, then **Security Reader**), each generating an Entra *"Add member to role"*
-   audit event for the detection to catch.
-6. **Validated the pipeline end to end** — confirmed the audit event lands in `law-soc-lab` via KQL,
-   promoted the query to a scheduled **analytics rule** (built in the unified **Microsoft Defender
-   portal**, where Sentinel analytics-rule management now lives), and watched it raise a
-   **High-severity incident** with `soc-test01` auto-mapped as the impacted entity — then tuned out
-   duplicate alerts caused by the 24-hour lookback.
+1. Created a resource group (`rg-soc-lab`) and a Log Analytics workspace (`law-soc-lab`), then enabled
+   Microsoft Sentinel on it.
+2. Connected the identity log source. Sentinel's Content hub now redirects to the Defender portal, so
+   I onboarded Entra logs the supported way instead: a diagnostic setting (`entra-to-law`) that streams
+   AuditLogs and SignInLogs into the workspace. Per Microsoft's docs, creating that diagnostic setting
+   auto-enables the Sentinel Entra connector.
+3. Created the test subject, `soc-test01`, a member account with no privileges.
+4. Simulated the attack by adding `soc-test01` to two sensitive read-only roles, Global Reader and then
+   Security Reader. Each one writes an "Add member to role" audit event, which is exactly what the
+   detection looks for.
+5. Validated the whole pipeline. I confirmed the event landed in the workspace with KQL, promoted that
+   query to a scheduled analytics rule (built in the Defender portal, where Sentinel rule management
+   lives now), and watched it raise a high-severity incident with `soc-test01` mapped as the entity.
+   Then I cleaned up the duplicate alerts the 24-hour lookback was throwing.
 
-## Detection — Privileged role assignment (`T1098`)
+## Detection: privileged role assignment (`T1098`)
 
 Fires when an account is added to a sensitive directory role:
 
@@ -85,60 +84,60 @@ AuditLogs
 | order by TimeGenerated desc
 ```
 
-### Planned expansion (next iterations)
-- **Anomalous sign-in / impossible travel** (`T1078`) — from `SignInLogs`; requires **Entra ID P1**.
-- **Brute force** (`T1110`) and **suspicious PowerShell** (`T1059.001`) — require a Windows log
-  source (a small Azure VM with the Azure Monitor Agent), documented as the next build-out.
+### What I'd add next
+- Anomalous sign-in / impossible travel (`T1078`), from `SignInLogs`. Needs Entra ID P1.
+- Brute force (`T1110`) and suspicious PowerShell (`T1059.001`). Both need a Windows log source, like a
+  small Azure VM running the Azure Monitor Agent.
 
 ## Skills demonstrated
 
-- Microsoft Sentinel deployment and workspace setup
-- Identity log onboarding via **Entra ID diagnostic settings** (audit + sign-in)
-- **Detection engineering in KQL** (parsing `AuditLogs`, `mv-expand`, role allow-list)
-- Mapping detections to **MITRE ATT&CK** (T1098 privilege escalation)
-- Controlled attack simulation and end-to-end pipeline validation
-- Identity & access fundamentals (directory roles, least privilege)
+- Deploying Microsoft Sentinel and setting up a Log Analytics workspace
+- Onboarding identity logs through Entra ID diagnostic settings (audit and sign-in)
+- Writing detections in KQL: parsing `AuditLogs`, `mv-expand`, a role allow-list
+- Mapping detections to MITRE ATT&CK (T1098)
+- Running a controlled attack simulation and validating the full pipeline
+- Identity and access basics: directory roles, least privilege
 
 ## Results / Evidence
 
 > Screenshots captured to `C:\Users\jcade\Downloads\soc-lab-assets`, then copied into `assets/`.
 
-- [x] `assets/01-sentinel-overview.png` — Sentinel enabled on `law-soc-lab`
-- [x] `assets/02-entra-diagnostic-settings.png` — `entra-to-law` connector → `law-soc-lab`
-- [x] `assets/03-role-assignment.png` — `soc-test01` granted Global Reader (the trigger)
-- [x] `assets/04-kql-auditlog.png` — detection KQL returning the captured "Add member to role" event (Security Reader)
-- [x] `assets/05-analytics-rule.png` — the scheduled rule (Enabled · High · T1098) in the Defender portal
-- [x] `assets/06-incident.png` — the resulting **High** incident with `soc-test01` mapped as the entity
-- [x] `assets/07-investigation.png` — the incident's alert queue (Privilege Escalation) for triage
+- [x] `assets/01-sentinel-overview.png`: Sentinel enabled on `law-soc-lab`
+- [x] `assets/02-entra-diagnostic-settings.png`: the `entra-to-law` setting pointed at `law-soc-lab`
+- [x] `assets/03-role-assignment.png`: `soc-test01` granted Global Reader (the trigger)
+- [x] `assets/04-kql-auditlog.png`: detection KQL returning the captured "Add member to role" event
+- [x] `assets/05-analytics-rule.png`: the scheduled rule (Enabled, High, T1098) in the Defender portal
+- [x] `assets/06-incident.png`: the resulting High incident with `soc-test01` mapped as the entity
+- [x] `assets/07-investigation.png`: the incident's alert queue (Privilege Escalation) for triage
 
 ## Lessons learned
 
-Real findings from building this lab:
+A few things I ran into building this:
 
-- **Sentinel has moved into the unified Defender portal.** Both the Content hub and **analytics-rule
-  creation** now redirect out of the Azure portal — you connect the workspace to Defender
-  (System → Settings → Microsoft Sentinel) and build rules under **Microsoft Sentinel → Configuration
-  → Analytics**. Onboarding Entra logs is still done via **diagnostic settings**, which auto-enables
-  the connector. Right after connecting a workspace, the Analytics page briefly redirects to workspace
-  settings until onboarding propagates (~tens of minutes) — expected, not an error.
-- **Lookback vs. run frequency drives alert noise.** Running every 5 minutes with a 24-hour lookback
-  meant each run re-detected the same event and raised a duplicate alert (one incident, three alerts).
-  Fixed with **alert suppression** (stop querying for 24h after an alert) so one event maps to one
-  alert — a core detection-tuning trade-off.
-- **First-time log ingestion is slow.** Microsoft documents that after creating a diagnostic
-  setting, data starts flowing **within ~90 minutes** and can officially take **up to three days**
-  on first setup. Plan validation around that latency rather than expecting instant results.
-- **Sign-in logs need Entra ID P1**; audit logs flow on any (including free) license. The license
-  gate is enforced silently, so confirm which log types actually arrive.
-- **Never store credentials in a portfolio repo.** The lab's test password is kept out of git and
-  the account is deleted in cleanup — basic hygiene that a SOC review should enforce.
+- Sentinel moved into the Defender portal partway through. Both the Content hub and analytics-rule
+  creation now redirect out of the Azure portal. You connect the workspace to Defender
+  (System → Settings → Microsoft Sentinel), then build rules under Microsoft Sentinel → Configuration →
+  Analytics. Log onboarding still happens through diagnostic settings. The thing that threw me: right
+  after you connect a workspace, the Analytics page keeps bouncing back to workspace settings until
+  onboarding propagates. That's normal, not a permissions problem, but it cost me a half hour of
+  second-guessing.
+- Lookback and run frequency interact in a way that makes noise. My rule ran every 5 minutes but looked
+  back 24 hours, so every run re-found the same event and opened another alert. One incident, three
+  alerts before I caught it. The fix is alert suppression: stop querying for 24 hours after a hit, so
+  one event produces one alert.
+- First-time ingestion is slow. Microsoft says data starts flowing within about 90 minutes and can take
+  up to three days on first setup. Plan validation around that instead of expecting instant results.
+- Sign-in logs need Entra ID P1; audit logs flow on any license, free included. The license gate is
+  silent, so check which log types are actually arriving before you assume the pipeline is broken.
+- Don't put credentials in a portfolio repo. The test account's password stays out of git, and the
+  account gets deleted in cleanup. Basic hygiene, but it's the kind of thing a SOC review exists to catch.
 
 ## Mapped to
 
-- **CompTIA Security+ (SY0-701) — Domain 4, Security Operations:** monitoring & alerting, SIEM /
-  log data analysis, incident response.
-- **MITRE ATT&CK:** T1098 (Account Manipulation / privilege escalation). Planned: T1078, T1110, T1059.001.
+- CompTIA Security+ (SY0-701), Domain 4 (Security Operations): monitoring and alerting, SIEM and log
+  analysis, incident response.
+- MITRE ATT&CK: T1098 (Account Manipulation / privilege escalation). Next up: T1078, T1110, T1059.001.
 
 ## Reproduce this lab
 
-Step-by-step instructions: **[BUILD-GUIDE.md](BUILD-GUIDE.md)**
+Step-by-step instructions: [BUILD-GUIDE.md](BUILD-GUIDE.md)
