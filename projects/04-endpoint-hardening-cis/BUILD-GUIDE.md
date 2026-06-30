@@ -93,7 +93,7 @@ host key; answer `yes`.
    score** (it'll be low on a default install, your "before" number).
    📸 `cis-01-windows-baseline-scan.png` (the report header with the failing score).
 
-> Keep the report. Save it under `assets/` as a working file if you want, but the screenshot of the
+> Keep the report. Save it under `assets/windows/` as a working file if you want, but the screenshot of the
 > score is what the write-up references.
 
 ## Phase 2: Harden Windows to Level 1
@@ -359,7 +359,7 @@ or a small `exceptions.md`). 📸 `cis-07-exceptions-register.png`.
 - [ ] `cis-04-linux-lynis-baseline.png` · [ ] `cis-05-linux-hardening-script.png` · [ ] `cis-06-linux-lynis-rescan.png`
 - [ ] `cis-07-exceptions-register.png`
 
-Copy the screenshots into this project's `assets/`, fill the before/after scores into the README's
+Copy each screenshot into `assets/linux/` or `assets/windows/`, fill the before/after scores into the README's
 results table, then flip the status from **In Progress** to **Documented**.
 
 ## Phase 10: Cleanup

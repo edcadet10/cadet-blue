@@ -61,13 +61,13 @@ commands and gotchas in the [build guide](BUILD-GUIDE.md).
 | Ubuntu 22.04 | Lynis index | **59** | **80** |
 | Windows 11 | CIS-CAT Lite L1 | _pending_ | _pending_ |
 
-**Linux (done):**
+**Linux** (done), in [`assets/linux/`](assets/linux/):
 - [x] baseline 59: `cis-04-linux-lynis-baseline.png` + `cis-04-lynis-baseline.txt`
 - [x] SSH before/after, firewall, fail2ban, auditd, AIDE: `cis-05-linux-{ssh-hardening-before,ssh-hardening-after,firewall,fail2ban,auditd,aide}.png`
 - [x] sysctl proof `cis-05-linux-sysctl.txt`; `cis-05-linux-password-policy.png`; `cis-05-linux-attack-surface.png`
 - [x] rescan 80: `cis-06-linux-lynis-rescan.png`
 
-**Windows (pending):**
+**Windows** (pending), in [`assets/windows/`](assets/windows/):
 - [ ] `cis-01-windows-baseline-scan.png`, `cis-02-windows-gpo-settings.png`, `cis-03-windows-rescan.png`
 
 ## Lessons learned

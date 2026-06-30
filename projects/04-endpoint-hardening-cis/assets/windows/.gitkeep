@@ -1,0 +1,2 @@
+# Windows 11 hardening evidence goes here (cis-01 / cis-02 / cis-03-windows-*.png).
+# See ../../BUILD-GUIDE.md Phases 1-4: CIS-CAT Lite baseline -> secpol/GPO/registry -> rescan.
