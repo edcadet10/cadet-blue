@@ -62,7 +62,7 @@ it demonstrates, and the evidence. Status is labeled honestly — see the legend
 | 03 | [Vulnerability Management Program](projects/03-vulnerability-management/) | Vuln Mgmt | 📋 Planned |
 | 04 | [Endpoint Hardening to CIS Benchmark](projects/04-endpoint-hardening-cis/) | Vuln Mgmt | 📋 Planned |
 | 05 | [Risk Assessment & GRC Package (NIST CSF / CIS Controls)](projects/05-grc-risk-assessment/) | GRC | 📋 Planned |
-| 06 | [Identity & Access Management on Entra ID](projects/06-iam-entra-id/) | IAM | 🗂️ Outlined |
+| 06 | [Identity & Access Management on Entra ID](projects/06-iam-entra-id/) | IAM | ✅ Documented |
 | 07 | [Automated Joiner/Mover/Leaver (Microsoft Graph)](projects/07-iam-automated-provisioning/) | IAM / Automation | 📋 Planned |
 | 08 | [Network Segmentation Lab (Packet Tracer)](projects/08-network-segmentation-lab/) | Network | 🗂️ Outlined |
 | 09 | [Service Desk Operations (ServiceNow / ITIL)](projects/09-servicedesk-servicenow/) | Help Desk | 🗂️ Outlined |
