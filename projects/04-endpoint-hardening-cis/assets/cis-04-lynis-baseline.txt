@@ -1,0 +1,99 @@
+Lynis 3.0.7 baseline audit: vm-harden-linux (Ubuntu 22.04.5 LTS on Azure)
+Captured before any hardening. This is the "before" evidence for project 04.
+
+  Operating system:          Ubuntu 22.04
+  Kernel version:            6.8.0
+  Hardware platform:         x86_64
+  Hostname:                  vm-harden-linux
+
+================================ RESULT ====================================
+
+  Hardening index : 59  [###########         ]
+  Tests performed : 254
+  Plugins enabled : 1
+
+  Components:
+  - Firewall               [V]   (iptables module loaded, but NO active rules)
+  - Malware scanner        [X]   (none installed)
+
+--------------------------------- WARNINGS (2) -----------------------------
+
+  ! Found one or more vulnerable packages.                       [PKGS-7392]
+  ! iptables module(s) loaded, but no rules active               [FIRE-4512]
+
+------------------------------- SUGGESTIONS (47) ---------------------------
+
+  Boot / services
+  - Set a password on the GRUB boot loader                       [BOOT-5122]
+  - Consider hardening system services                           [BOOT-5264]
+
+  Kernel
+  - Explicitly disable core dumps in security/limits.conf        [KRNL-5820]
+  - 14 sysctl keys differ from the hardening profile             [KRNL-6000]
+      DIFFERENT: dev.tty.ldisc_autoload, fs.protected_fifos, fs.suid_dumpable,
+      kernel.kptr_restrict, kernel.modules_disabled, kernel.perf_event_paranoid,
+      kernel.sysrq, kernel.unprivileged_bpf_disabled, net.core.bpf_jit_harden,
+      net.ipv4.conf.all.accept_redirects, .log_martians, .rp_filter,
+      .send_redirects, net.ipv6.conf.*.accept_redirects
+
+  Users / authentication
+  - Configure password hashing rounds in /etc/login.defs         [AUTH-9230]
+  - Install a PAM password-strength module (pam_pwquality)       [AUTH-9262]
+  - Review and remove locked accounts                            [AUTH-9284]
+  - Configure minimum password age in /etc/login.defs            [AUTH-9286]
+  - Configure maximum password age in /etc/login.defs            [AUTH-9286]
+  - Default umask in /etc/login.defs could be 027                [AUTH-9328]
+
+  File systems
+  - Place /home on a separate partition                          [FILE-6310]
+  - Place /tmp on a separate partition                           [FILE-6310]
+  - Place /var on a separate partition                           [FILE-6310]
+  - Disable USB storage driver when not in use                   [USB-1000]
+  - Consider restricting file permissions (cron, grub, sshd)     [FILE-7524]
+
+  Packages / patching
+  - Install libpam-tmpdir                                        [DEB-0280]
+  - Install apt-listbugs                                         [DEB-0810]
+  - Install apt-listchanges                                      [DEB-0811]
+  - Install fail2ban                                             [DEB-0880]
+  - Install debsums (verify packages vs known-good DB)           [PKGS-7370]
+  - Run apt update/upgrade / unattended-upgrades                 [PKGS-7392]
+  - Install apt-show-versions for patch management               [PKGS-7394]
+
+  Networking
+  - Determine if protocol 'dccp' is needed                       [NETW-3200]
+  - Determine if protocol 'sctp' is needed                       [NETW-3200]
+  - Determine if protocol 'rds'  is needed                       [NETW-3200]
+  - Determine if protocol 'tipc' is needed                       [NETW-3200]
+  - Add IP/FQDN to /etc/hosts                                    [NAME-4404]
+
+  SSH (SSH-7408), harden the daemon:
+  - AllowTcpForwarding      YES -> NO
+  - ClientAliveCountMax       3 -> 2
+  - Compression             YES -> NO
+  - LogLevel               INFO -> VERBOSE
+  - MaxAuthTries              6 -> 3
+  - MaxSessions              10 -> 2
+  - Port                     22 -> (non-default)
+  - TCPKeepAlive            YES -> NO
+  - X11Forwarding           YES -> NO
+  - AllowAgentForwarding    YES -> NO
+
+  Logging / accounting / integrity
+  - Enable remote logging to an external host                    [LOGG-2154]
+  - Add a legal banner to /etc/issue                             [BANN-7126]
+  - Add a legal banner to /etc/issue.net                         [BANN-7130]
+  - Enable process accounting                                    [ACCT-9622]
+  - Enable auditd to collect audit information                   [ACCT-9628]
+  - Install a file integrity tool (AIDE)                         [FINT-4350]
+
+  Hardening / tooling
+  - Determine if automation tooling is needed                    [TOOL-5002]
+  - Harden compilers (restrict to root)                          [HRDN-7222]
+  - Install a malware scanner (rkhunter/chkrootkit)              [HRDN-7230]
+  - Set a session timeout (TMOUT)                                [SHLL-6220]
+  - Set a stricter default umask in shells                       [SHLL-6230]
+
+============================================================================
+Full machine log on the host: /var/log/lynis.log
+Report data:                  /var/log/lynis-report.dat

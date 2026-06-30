@@ -5,12 +5,13 @@ score each against its CIS Benchmark, harden to Level 1, document the controls y
 off, and rescan to show the improvement. Everything runs in throwaway VMs with snapshots, so any
 change you make is reversible in one click.
 
-> **Cost / license note:** This lab is free. The assessor (CIS-CAT Lite) and the Benchmark PDFs both
+> **Cost / license note:** This lab runs on free tooling. The assessor (CIS-CAT Lite) and the Benchmark PDFs both
 > download from CIS behind an email registration. The ready-made remediation GPOs (CIS Build Kits)
 > are **members-only** (they need a paid CIS SecureSuite membership), so this guide hardens the hosts
 > the free way instead: by hand through Local Group Policy / Local Security Policy on Windows, and with
 > a script on Linux. Microsoft's Security Compliance Toolkit (also free) is shown as the bulk option
-> for Windows. No cloud resources, so nothing bills.
+> for Windows. Host the two VMs locally (free) or as small Azure VMs (a few cents an hour, deleted at the
+> end, see Phase 0b); the hardening is the same either way.
 
 > **Safety:** Harden VMs, never your daily driver. Snapshot each VM *clean* before you touch it
 > (Phase 0). Some CIS settings (SMBv1 off, anonymous restrictions, NTLMv2-only) can cut a host off
@@ -20,7 +21,9 @@ change you make is reversible in one click.
 
 ## Phase 0: Prerequisites and safe setup
 
-- [ ] Two VMs in Hyper-V or VirtualBox: **Windows 11** (or Windows Server 2022) and **Ubuntu 22.04 LTS**.
+- [ ] Two hosts: **Windows 11** (or Windows Server 2022) and **Ubuntu 22.04 LTS**. Run them as local VMs
+      (Hyper-V or VirtualBox) or as Azure VMs; for the Azure route and how to pick a size, region, and
+      image, see **Phase 0b**.
 - [ ] Take a **clean snapshot** of each before any change. Name them `clean-baseline`.
 - [ ] Download **CIS-CAT Lite** (register at the CIS site → "CIS-CAT Lite"). Recent builds ship a
       bundled Java runtime; if yours doesn't, install Temurin/OpenJDK 8+.
@@ -32,6 +35,53 @@ change you make is reversible in one click.
 > **Why CIS-CAT Lite:** it's the free assessor, and it covers exactly the two benchmarks this lab uses
 > (Windows 10/11 and Ubuntu 22.04). The Pro assessor and the Build Kits are SecureSuite-only; you don't
 > need them to demonstrate the skill.
+
+## Phase 0b: Hosting the VMs on Azure (what I used)
+
+I ran both hosts as Azure VMs rather than local Hyper-V. The hardening steps are the same wherever the
+VM lives; only the provisioning differs. The exact size and region I picked may not be available to you,
+so here's how to choose your own.
+
+**Create the Ubuntu host (Azure portal):**
+
+1. **Resource group.** Make a fresh one (I used `rg-hardening-lab`) so the whole lab deletes in one click
+   at the end.
+2. **Region.** Pick one with spare capacity. Small VM sizes get capacity-restricted region by region, so
+   if a size shows "Size not available," switch regions and try again. Big regions like East US and
+   Central US usually have room. To check before you commit, `az vm list-usage -l <region>` shows your
+   own vCPU quota per family.
+3. **Image.** This is the step people get wrong. In the Marketplace, set the **Publisher name** filter to
+   **Canonical**, then pick **Ubuntu Server 22.04 LTS - x64 Gen2** (free). Skip:
+   - the third-party rebuilds (cloudimg, Ntegral, and the like) that add an hourly software surcharge on
+     top of compute,
+   - the **Ubuntu Pro / FIPS / Confidential** plans, which are paid and not a clean baseline,
+   - and anything labeled **"CIS Hardening"** or "pre-hardened." Starting from a hardened image defeats
+     the exercise. You want a default install so the before-and-after scan shows the work.
+4. **Size.** Any small general-purpose size is plenty; 2 vCPU and 4 GB covers Lynis and the hardening
+   comfortably. Try the cheapest first (a B-series like `B2s` or `B2as_v2`). If it's greyed out or throws
+   a capacity error, the portal only lists sizes that will actually deploy, so take any available small
+   one. A `Dasv5` or a current `D`-series works. I landed on `D2s_v7` because the B-series was
+   capacity-blocked in my region that day.
+5. **Authentication.** SSH public key, username `azureuser`, generate a new key pair, and download the
+   `.pem`.
+6. **Inbound ports.** Allow SSH (22). Better: scope the network security group rule's source to your own
+   public IP so the box isn't open to the whole internet.
+7. **Create.** A size this small costs a few cents an hour, and you delete the resource group at the end
+   (Phase 10), so the whole run stays well under a dollar.
+
+**Connect:**
+
+```bash
+# Windows refuses a key file other accounts can read, so lock it down first:
+icacls "<path>\<key>.pem" /inheritance:r /grant:r "<your-username>:R"
+ssh -i "<path>\<key>.pem" azureuser@<PUBLIC_IP>
+```
+
+On Linux or macOS the equivalent is `chmod 600 <key>.pem`. The first connection asks you to trust the
+host key; answer `yes`.
+
+> A real VM (Azure or local Hyper-V) beats WSL here: auditd, the host firewall, and the kernel `sysctl`
+> settings all behave normally. WSL skips or fakes several of them, which skews the Lynis score.
 
 ## Phase 1: Windows baseline scan (CIS-CAT Lite)
 
@@ -144,93 +194,150 @@ Note the **Hardening index** (0 to 100) at the bottom, plus the warnings and sug
 > percentage on Linux too, CIS-CAT Lite also covers the Ubuntu 22.04 benchmark; run it the same way as
 > Phase 1 and screenshot that score instead.
 
-## Phase 6: Harden Ubuntu to CIS L1
+## Phase 6: Harden Ubuntu to CIS L1 (one control group at a time)
 
-Apply a representative L1 set. This is a transparent script, not the full benchmark. The CIS PDF has
-~200 items; this hits the high-impact ones. Snapshot first.
+Don't paste a giant script and trust it. Work one control group at a time, and after each change
+**verify it actually took effect** with the matching command. A config file that never saved, or a
+service that never reloaded, looks identical to success until you check. Every unit below is: what it
+defends against, the change, and the proof. The Lynis findings from Phase 5 are the syllabus.
+
+### Unit 1: SSH (CIS 5.2 / `SSH-7408`)
+
+SSH is the front door. These options shrink the attack surface and slow brute force. Use a **drop-in
+file**, which overrides the main `sshd_config` through its `Include` line and survives package updates.
+A here-doc is more reliable than a text editor, where it's easy to forget to save:
 
 ```bash
-#!/usr/bin/env bash
-set -euo pipefail
-
-# --- SSH hardening (CIS 5.2.x): edit /etc/ssh/sshd_config ---
-sudo sed -i 's/^#\?PermitRootLogin.*/PermitRootLogin no/'        /etc/ssh/sshd_config
-sudo sed -i 's/^#\?MaxAuthTries.*/MaxAuthTries 4/'               /etc/ssh/sshd_config
-sudo sed -i 's/^#\?LoginGraceTime.*/LoginGraceTime 60/'          /etc/ssh/sshd_config
-sudo sed -i 's/^#\?X11Forwarding.*/X11Forwarding no/'            /etc/ssh/sshd_config
-sudo sed -i 's/^#\?PermitEmptyPasswords.*/PermitEmptyPasswords no/' /etc/ssh/sshd_config
-sudo sed -i 's/^#\?ClientAliveInterval.*/ClientAliveInterval 300/' /etc/ssh/sshd_config
-sudo sed -i 's/^#\?ClientAliveCountMax.*/ClientAliveCountMax 0/'  /etc/ssh/sshd_config
-sudo systemctl restart ssh
-# Note: do NOT add "Protocol 2"; the directive was removed in OpenSSH 7.6+ and will error on 22.04.
-
-# --- Host firewall (CIS 3.5.x) ---
-sudo apt install -y ufw
-sudo ufw default deny incoming
-sudo ufw default allow outgoing
-sudo ufw allow OpenSSH
-sudo ufw --force enable
-
-# --- Password quality & aging (CIS 5.3.x / 5.4.x) ---
-sudo apt install -y libpam-pwquality
-sudo sed -i 's/^# minlen.*/minlen = 14/'   /etc/security/pwquality.conf
-sudo sed -i 's/^# dcredit.*/dcredit = -1/' /etc/security/pwquality.conf
-sudo sed -i 's/^# ucredit.*/ucredit = -1/' /etc/security/pwquality.conf
-sudo sed -i 's/^# ocredit.*/ocredit = -1/' /etc/security/pwquality.conf
-sudo sed -i 's/^# lcredit.*/lcredit = -1/' /etc/security/pwquality.conf
-sudo sed -i 's/^PASS_MAX_DAYS.*/PASS_MAX_DAYS 365/' /etc/login.defs
-sudo sed -i 's/^PASS_MIN_DAYS.*/PASS_MIN_DAYS 1/'   /etc/login.defs
-sudo sed -i 's/^PASS_WARN_AGE.*/PASS_WARN_AGE 7/'   /etc/login.defs
-
-# --- Kernel network hardening via sysctl (CIS 3.2.x / 3.3.x) ---
-sudo tee /etc/sysctl.d/60-cis.conf >/dev/null <<'EOF'
-net.ipv4.conf.all.send_redirects = 0
-net.ipv4.conf.default.send_redirects = 0
-net.ipv4.conf.all.accept_redirects = 0
-net.ipv4.conf.all.secure_redirects = 0
-net.ipv4.conf.all.accept_source_route = 0
-net.ipv4.conf.all.log_martians = 1
-net.ipv4.conf.all.rp_filter = 1
-net.ipv4.tcp_syncookies = 1
-net.ipv4.ip_forward = 0
-kernel.randomize_va_space = 2
+sudo tee /etc/ssh/sshd_config.d/60-cis.conf >/dev/null <<'EOF'
+PermitRootLogin no
+MaxAuthTries 3
+X11Forwarding no
+AllowTcpForwarding no
+AllowAgentForwarding no
+ClientAliveInterval 300
+ClientAliveCountMax 2
+LogLevel VERBOSE
 EOF
-sudo sysctl --system
-
-# --- Disable unused filesystems (CIS 1.1.1.x) ---
-sudo tee /etc/modprobe.d/cis-fs.conf >/dev/null <<'EOF'
-install cramfs /bin/true
-install freevxfs /bin/true
-install jffs2 /bin/true
-install hfs /bin/true
-install hfsplus /bin/true
-install udf /bin/true
-EOF
-
-# --- Auditing & file integrity (CIS 4.1.x / 1.3.x) ---
-sudo apt install -y auditd audispd-plugins aide aide-common
-sudo systemctl enable --now auditd
-sudo aideinit            # builds the baseline DB (takes a few minutes)
-
-# --- Automatic security updates (CIS 1.9 / patch hygiene) ---
-sudo apt install -y unattended-upgrades
-sudo dpkg-reconfigure -f noninteractive unattended-upgrades
+sudo sshd -t && sudo systemctl restart ssh
 ```
 
-For account lockout, Ubuntu 22.04 uses **`pam_faillock`**. Set `deny = 5` and `unlock_time = 900` in
-`/etc/security/faillock.conf`, then wire it into `/etc/pam.d/common-auth` and `common-account` (CIS
-5.4.2). Edit PAM carefully and keep a root shell open while you test, so a bad stanza can't lock you
-out. 📸 `cis-05-linux-hardening-script.png` (the script running, or a `diff` of `sshd_config`).
+Verify (this is the point), `sshd -T` prints the *effective* running config, so you prove the daemon
+actually loaded your values rather than just that a file exists:
+
+```bash
+sudo sshd -T | grep -Ei 'maxauthtries|permitrootlogin|x11forwarding|allowtcpforwarding|allowagentforwarding|loglevel'
+```
+
+Things that bite you here:
+- `MaxAuthTries 3` caps tries *per connection*, then disconnects. It does NOT ban the IP. That's
+  fail2ban (Unit 3). The two pair up: this weakens each attempt, fail2ban bans the source.
+- `AllowTcpForwarding no` stops a compromised session tunneling deeper into the network (pivoting, MITRE T1090).
+- `ClientAliveInterval` may read back lower than you set (e.g. 120) if a lower-numbered Azure drop-in
+  already sets it. Lower is stricter, so leave it.
+- Run `sshd -t` before the restart so a typo can't down the daemon and lock you out. And use `&&` (run
+  next only on success), not a single `&`, which backgrounds the first part and runs the next
+  regardless, so a success message proves nothing.
+
+📸 `cis-05-linux-ssh-hardening-before.png` / `-after.png` (the `sshd -T` grep, default vs hardened).
+
+### Unit 2: Host firewall (CIS 3.5 / `FIRE-4512`)
+
+Azure's NSG guards the network edge; CIS wants a firewall on the host too (defense in depth). **The
+rule that bites everyone:** you're connected over SSH, so allow SSH *before* enabling a deny-all
+firewall, or you lock yourself out.
+
+```bash
+sudo ufw allow OpenSSH            # open 22 FIRST
+sudo ufw default deny incoming
+sudo ufw default allow outgoing
+sudo ufw enable                   # answer 'y' to the ssh-disruption warning
+sudo ufw status verbose           # verify: active, deny (incoming), 22/tcp ALLOW IN
+```
+
+A specific allow rule for 22 overrides the default-deny, so SSH stays up while everything else is
+blocked. 📸 `cis-05-linux-firewall.png`.
+
+### Unit 3: fail2ban (`DEB-0880` / T1110)
+
+Watches the auth log and bans an IP at the firewall after repeated failures, completing the brute-force
+story started in Unit 1.
+
+```bash
+sudo apt install -y fail2ban
+sudo systemctl enable --now fail2ban
+sudo systemctl is-active fail2ban          # active
+sudo fail2ban-client status sshd           # sshd jail is on by default on Ubuntu
+```
+
+📸 `cis-05-linux-fail2ban.png`.
+
+### Unit 4: auditd + process accounting (`ACCT-9628` / `ACCT-9622`)
+
+Prevention stops attacks; auditd gives you *visibility*, the forensic log of logins, privilege use, and
+changes to sensitive files. It's the source a SIEM ingests (see project 01, the Protect vs Detect split).
+
+```bash
+sudo apt install -y auditd audispd-plugins acct
+sudo systemctl enable --now auditd
+sudo systemctl enable --now acct
+sudo systemctl is-active auditd            # active
+sudo auditctl -s | grep enabled            # enabled 1
+```
+
+📸 `cis-05-linux-auditd.png`.
+
+### Unit 5: AIDE file integrity (`FINT-4350` / T1554)
+
+auditd records events live; AIDE detects *lasting changes* to system files by comparing them against a
+known-good snapshot. Build the snapshot now, while the box is clean.
+
+```bash
+sudo apt install -y aide aide-common
+sudo aideinit                                            # slow: it hashes every system file
+sudo cp /var/lib/aide/aide.db.new /var/lib/aide/aide.db
+```
+
+> **Gotcha:** installing AIDE pulls in Postfix (a mail server, for emailing reports). At its prompt,
+> choose **`Local only`** and accept the default mail name. Don't stand up an internet-facing mail
+> server on a box you're hardening; "Local only" binds it to localhost. That decision is attack-surface
+> thinking in the wild, and worth a line in the write-up.
+
+Verify the baseline exists, then prove it works by planting a change and watching AIDE flag it:
+
+```bash
+ls -lh /var/lib/aide/aide.db
+sudo touch /etc/aide-test-file && sudo aide --check      # reports the file under "Added"
+sudo rm /etc/aide-test-file
+```
+
+📸 `cis-05-linux-aide.png` (AIDE catching the planted file is strong evidence: the control *working*, not just installed).
+
+### Units 6 to 8: kernel, accounts, attack surface
+
+Same method (apply, then verify) for the rest of the Lynis findings:
+
+- **Kernel hardening** (CIS 3.x / `KRNL-6000`): a `/etc/sysctl.d/60-cis.conf` covering redirects, source
+  routing, `log_martians`, `rp_filter`, `tcp_syncookies`, ASLR, and the `kernel.*` restrictions. Apply
+  with `sudo sysctl --system`; verify a key with `sudo sysctl kernel.kptr_restrict`.
+- **Accounts / passwords** (`AUTH-9230/9286/9328/9262`): `libpam-pwquality` (minlen 14, complexity) plus
+  `/etc/login.defs` (PASS_MAX_DAYS 365, PASS_MIN_DAYS 1, UMASK 027, hashing rounds).
+- **Attack surface** (`NETW-3200`, `USB-1000`, `BANN-7126/7130`, `FILE-7524`, `HRDN-7230`, `PKGS-7392`):
+  blacklist unused protocols, filesystems, and usb-storage via `/etc/modprobe.d/`; add a legal banner to
+  `/etc/issue` and `/etc/issue.net`; tighten cron and grub file permissions; install `rkhunter` and
+  `debsums`; apply pending security updates.
 
 ## Phase 7: Document the Linux exceptions
 
-Same discipline as Windows: each remaining Lynis warning is a decision:
+Each remaining Lynis item is a decision, not an oversight. The skips from this run:
 
-| Control | Decision | Justification |
-|---|---|---|
-| `PasswordAuthentication yes` | Kept (for now) | Key-based auth not yet provisioned in the lab; tracked to switch to keys, exception noted. |
-| GRUB bootloader password | Not set | Single-user lab VM with no untrusted physical access; would set on shared/physical hosts. |
-| CUPS / printing service | Left enabled | Needed for a lab task; disable on a server-role build. |
+| Control | Why |
+|---|---|
+| `kernel.modules_disabled` | blocks loading any module until reboot; too risky on a live host |
+| `fs.protected_fifos=2` | Ubuntu's `99-protect-links.conf` resets it to 1 (sysctl drop-ins are last-wins) |
+| GRUB password | single-user lab VM, no untrusted physical access |
+| Separate `/home /tmp /var` partitions | single-disk lab VM; would partition on a real build |
+| Remote logging | no external log host in the lab |
+| Password policy | host uses SSH keys, so it is belt-and-suspenders here |
 
 ## Phase 8: Rescan Linux (Lynis)
 
@@ -257,7 +364,8 @@ results table, then flip the status from **In Progress** to **Documented**.
 
 ## Phase 10: Cleanup
 
-- Revert both VMs to the `clean-baseline` snapshots (fastest, total rollback).
+- Local VMs: revert both to the `clean-baseline` snapshots (fastest, total rollback).
+- Azure: delete the whole resource group to stop all charges: `az group delete -n rg-hardening-lab --yes`.
 - Keep the CIS-CAT HTML reports and Lynis logs as working evidence if you like; the curated screenshots
   are what the write-up cites.
 

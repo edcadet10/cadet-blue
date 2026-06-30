@@ -1,0 +1,43 @@
+Unit 6: Kernel hardening (sysctl)
+CIS Ubuntu 22.04 §3.x  /  Lynis KRNL-6000
+Host: vm-harden-linux (Ubuntu 22.04 on Azure)
+
+Applied as a drop-in: /etc/sysctl.d/60-cis.conf
+-----------------------------------------------
+dev.tty.ldisc_autoload = 0
+fs.protected_fifos = 2
+fs.suid_dumpable = 0
+kernel.kptr_restrict = 2
+kernel.perf_event_paranoid = 3
+kernel.sysrq = 0
+kernel.unprivileged_bpf_disabled = 1
+net.core.bpf_jit_harden = 2
+net.ipv4.conf.all.accept_redirects = 0
+net.ipv4.conf.default.accept_redirects = 0
+net.ipv4.conf.all.send_redirects = 0
+net.ipv4.conf.default.send_redirects = 0
+net.ipv4.conf.all.log_martians = 1
+net.ipv4.conf.all.rp_filter = 1
+net.ipv4.conf.all.accept_source_route = 0
+net.ipv4.tcp_syncookies = 1
+net.ipv4.ip_forward = 0
+net.ipv6.conf.all.accept_redirects = 0
+kernel.randomize_va_space = 2
+
+Verification: effective values after `sudo sysctl --system`
+-----------------------------------------------------------
+kernel.randomize_va_space        = 2   (full ASLR)
+net.ipv4.conf.all.rp_filter      = 1   (reverse-path / anti-spoof)
+kernel.kptr_restrict             = 2   (hide kernel pointers)
+
+Notes / honest caveats
+----------------------
+- fs.protected_fifos requested 2, but Ubuntu's /usr/lib/sysctl.d/99-protect-links.conf
+  (higher-numbered, applied later) resets it to 1. sysctl drop-ins are last-wins, so the
+  99 file overrides the 60 file. Known limitation, left as-is.
+- The "Invalid argument" lines during `sysctl --system` come from Ubuntu's stock
+  /usr/lib/sysctl.d/50-default.conf (net.ipv4.conf.all.accept_source_route /
+  promote_secondaries), not from 60-cis.conf. Pre-existing, harmless.
+
+Defends against: ICMP-redirect / source-route traffic redirection, IP spoofing (rp_filter,
+log_martians), SYN-flood DoS (tcp_syncookies), and memory-corruption exploits (ASLR, kptr_restrict).
