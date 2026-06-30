@@ -4,6 +4,8 @@
 ![Cert](https://img.shields.io/badge/Maps%20to-Security%2B%20%2F%20A%2B-E2231A)
 ![Status](https://img.shields.io/badge/Status-In%20Progress-dbab09)
 
+![Endpoint Hardening: the path to CIS compliance](assets/infographic-endpoint-hardening.png)
+
 > Take a default Windows 11 and Ubuntu 22.04 host to their CIS Level 1 baselines, scoring each before
 > and after, and documenting every control I deliberately skip. **Linux host done: Lynis 59 → 80.**
 > Windows host is the remaining half.
