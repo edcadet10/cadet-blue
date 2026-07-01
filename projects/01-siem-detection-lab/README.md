@@ -4,6 +4,8 @@
 ![Cert](https://img.shields.io/badge/Maps%20to-Security%2B-E2231A)
 ![Status](https://img.shields.io/badge/Status-Documented-2ea44f)
 
+![SIEM detection lab: from raw log to triaged incident](assets/infographic-siem-detection.png)
+
 > Stood up Microsoft Sentinel on a fresh Log Analytics workspace, streamed Entra ID identity logs
 > into it, and wrote a detection that fires when someone is added to a sensitive directory role.
 > Then I proved it works: elevated a test account and followed the event from raw log to triaged incident.
